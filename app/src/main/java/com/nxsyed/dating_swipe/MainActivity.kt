@@ -35,19 +35,27 @@ class MainActivity : AppCompatActivity(), CardStackListener {
 
     private val cardStackView by lazy { findViewById<CardStackView>(R.id.card_stack_view) }
     private val manager by lazy { CardStackLayoutManager(this, this) }
-    private val adapter by lazy { CardStackAdapter(createSpots(listOf(listOf("Syed Ahmed", 5.6), listOf("Adam Bavosa", 7)))) }
+    private val adapter by lazy { CardStackAdapter(createSpots("Welcome to Dating Swipe!", "0")) }
     private val MY_PERMISSIONS_REQUESTACCESS_COARSE_LOCATION = 1
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
 
 
+    private val pnConfiguration = PNConfiguration()
+    init {
+        pnConfiguration.subscribeKey = "sub-c-87dbd99c-e470-11e8-8d80-3ee0fe19ec50"
+        pnConfiguration.publishKey = "pub-c-09557b6c-9513-400f-a915-658c0789e264"
+        pnConfiguration.secretKey = "true"
+    }
+    private val pubNub = PubNub(pnConfiguration)
+
+    private val userLocation = mutableListOf<Double>(0.0,0.0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        val androidID = Settings.Secure.getString(this.getContentResolver(), Settings.Secure.ANDROID_ID);
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val userLocation = listOf(0.0, 0.0)
-
+        val androidID = Settings.Secure.getString(this.getContentResolver(), Settings.Secure.ANDROID_ID)
 
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -74,6 +82,8 @@ class MainActivity : AppCompatActivity(), CardStackListener {
             fusedLocationClient.lastLocation
                     .addOnSuccessListener { location: Location? ->
                         if (location != null) {
+                            userLocation[0] = location.latitude
+                            userLocation[1] = location.longitude
                             Log.d("Location", location.latitude.toString())
                         } else {
                             Log.d("Location", location?.latitude.toString())
@@ -89,32 +99,36 @@ class MainActivity : AppCompatActivity(), CardStackListener {
 
             override fun message(pubnub: PubNub, message: PNMessageResult) {
                 Log.d("PubNub", message.message.toString())
+                var person = message.message.asJsonObject
+                runOnUiThread { paginate(person.get("ID").toString(), person.get("distance").toString()) }
             }
 
             override fun presence(pubnub: PubNub, presence: PNPresenceEventResult) {
             }
         }
 
-        val pnConfiguration = PNConfiguration()
-        pnConfiguration.subscribeKey = "sub-c-87dbd99c-e470-11e8-8d80-3ee0fe19ec50"
-        pnConfiguration.publishKey = "pub-c-09557b6c-9513-400f-a915-658c0789e264"
-        pnConfiguration.secretKey = "true"
-        val pubNub = PubNub(pnConfiguration)
-
         pubNub.run {
             addListener(subscribeCallback)
             subscribe()
-                    .channels(Arrays.asList("UserList"))
+                    .channels(Arrays.asList(androidID))
                     .execute()
         }
+
+        setupCardStackView()
+        setupButton()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val androidID = Settings.Secure.getString(this.getContentResolver(), Settings.Secure.ANDROID_ID)
 
         pubNub.run {
             publish()
                     .message("""
                         {
                             "location": {
-                                "lat":-10000.0202,
-                                "long":23.020202
+                                "lat":${userLocation[0]},
+                                "long":${userLocation[1]}
                             },
                             "id": "$androidID"
                         }
@@ -130,10 +144,6 @@ class MainActivity : AppCompatActivity(), CardStackListener {
                         }
                     })
         }
-
-
-        setupCardStackView()
-        setupButton()
 
     }
 
@@ -167,7 +177,7 @@ class MainActivity : AppCompatActivity(), CardStackListener {
     override fun onCardSwiped(direction: Direction) {
         Log.d("CardStackView", "onCardSwiped: p = ${manager.topPosition}, d = $direction")
         if (manager.topPosition == adapter.itemCount - 5) {
-            paginate()
+            paginate("", "")
         }
     }
 
@@ -247,24 +257,23 @@ class MainActivity : AppCompatActivity(), CardStackListener {
         }
     }
 
-    private fun paginate() {
+    private fun paginate(name: String?, distance: String?) {
         val old = adapter.getSpots()
-        val new = old.plus(createSpots(nearMeList = listOf(listOf("Syed Ahmed", 5.6), listOf("Adam Bavosa", 7))))
+        val new = old.plus(createSpots("Person: $name", "Distance: $distance"))
         val callback = SpotDiffCallback(old, new)
         val result = DiffUtil.calculateDiff(callback)
         adapter.setSpots(new)
         result.dispatchUpdatesTo(adapter)
     }
 
-    private fun createSpots(nearMeList: List<List<Any>>): List<Spot> {
+    private fun createSpots(personName: String, personDistance: String): List<Spot> {
         val spots = ArrayList<Spot>()
-        for(person in nearMeList){
-            spots.add(Spot(
-                    name = person[0].toString(),
-                    distance = person[1].toString(),
-                    url = "https://i0.wp.com/christopherscottedwards.com/wp-content/uploads/2018/07/Generic-Profile.jpg?resize=300%2C218&ssl=1"
-            ))
-        }
+        spots.add(Spot(
+                name = personName,
+                distance = personDistance,
+                url = "https://picsum.photos/200/300/?random"
+        ))
+
         return spots
     }
 
