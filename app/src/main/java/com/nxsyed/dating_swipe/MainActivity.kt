@@ -19,6 +19,7 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.TextView
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
+import com.google.gson.JsonElement
 import com.pubnub.api.PNConfiguration
 import com.pubnub.api.PubNub
 import com.pubnub.api.callbacks.PNCallback
@@ -45,7 +46,6 @@ class MainActivity : AppCompatActivity(), CardStackListener {
     init {
         pnConfiguration.subscribeKey = "sub-c-87dbd99c-e470-11e8-8d80-3ee0fe19ec50"
         pnConfiguration.publishKey = "pub-c-09557b6c-9513-400f-a915-658c0789e264"
-        pnConfiguration.secretKey = "true"
     }
     private val pubNub = PubNub(pnConfiguration)
 
@@ -55,28 +55,17 @@ class MainActivity : AppCompatActivity(), CardStackListener {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val androidID = Settings.Secure.getString(this.getContentResolver(), Settings.Secure.ANDROID_ID)
-
+        val androidID = Settings.Secure.getString(this.contentResolver, Settings.Secure.ANDROID_ID)
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         if (checkSelfPermission(this, android.Manifest.permission.ACCESS_COARSE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
-            // Permission is not granted
-            // Should we show an explanation?
             if (ActivityCompat.shouldShowRequestPermissionRationale(this,
                             android.Manifest.permission.ACCESS_COARSE_LOCATION)) {
-                // Show an explanation to the user *asynchronously* -- don't block
-                // this thread waiting for the user's response! After the user
-                // sees the explanation, try again to request the permission.
             } else {
-                // No explanation needed, we can request the permission.
                 ActivityCompat.requestPermissions(this,
                         arrayOf(android.Manifest.permission.ACCESS_COARSE_LOCATION),
                         MY_PERMISSIONS_REQUESTACCESS_COARSE_LOCATION)
-
-                // MY_PERMISSIONS_REQUEST_READ_CONTACTS is an
-                // app-defined int constant. The callback method gets the
-                // result of the request.
             }
         } else {
             fusedLocationClient.lastLocation
@@ -98,9 +87,28 @@ class MainActivity : AppCompatActivity(), CardStackListener {
             }
 
             override fun message(pubnub: PubNub, message: PNMessageResult) {
-                Log.d("PubNub", message.message.toString())
-                var person = message.message.asJsonObject
-                runOnUiThread { paginate(person.get("ID").toString(), person.get("distance").toString()) }
+                if(message.message.isJsonArray){
+                    for (person: JsonElement in message.message.asJsonArray) {
+                        pubNub.run {
+                            publish()
+                                    .message("""["$androidID", $person, ${userLocation[0]}, ${userLocation[1]}]""")
+                                    .channel("distance")
+                                    .async(object : PNCallback<PNPublishResult>() {
+                                        override fun onResponse(result: PNPublishResult, status: PNStatus) {
+                                            if (!status.isError) {
+                                                println("Message was published")
+                                            } else {
+                                                println("Could not publish")
+                                            }
+                                        }
+                                    })
+                        }
+                    }
+                }else{
+                    var person = message.message.asJsonObject
+                    runOnUiThread { paginate(person.get("ID").toString(), person.get("distance").toString()) }
+                }
+
             }
 
             override fun presence(pubnub: PubNub, presence: PNPresenceEventResult) {
@@ -110,7 +118,7 @@ class MainActivity : AppCompatActivity(), CardStackListener {
         pubNub.run {
             addListener(subscribeCallback)
             subscribe()
-                    .channels(Arrays.asList(androidID))
+                    .channels(Arrays.asList(androidID, "$androidID-distance"))
                     .execute()
         }
 
@@ -145,29 +153,6 @@ class MainActivity : AppCompatActivity(), CardStackListener {
                     })
         }
 
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int,
-                                            permissions: Array<String>, grantResults: IntArray) {
-        when (requestCode) {
-            MY_PERMISSIONS_REQUESTACCESS_COARSE_LOCATION -> {
-                // If request is cancelled, the result arrays are empty.
-                if ((grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)) {
-                    // permission was granted, yay! Do the
-                    // contacts-related task you need to do.
-                } else {
-                    // permission denied, boo! Disable the
-                    // functionality that depends on this permission.
-                }
-                return
-            }
-
-            // Add other 'when' lines to check for other
-            // permissions this app might request.
-            else -> {
-                // Ignore all other requests.
-            }
-        }
     }
 
     override fun onCardDragging(direction: Direction, ratio: Float) {
@@ -273,7 +258,6 @@ class MainActivity : AppCompatActivity(), CardStackListener {
                 distance = personDistance,
                 url = "https://picsum.photos/200/300/?random"
         ))
-
         return spots
     }
 
